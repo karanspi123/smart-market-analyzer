@@ -419,6 +419,117 @@ async def read_root():
         ]
     }
 
+@app.post("/strategy/select")
+async def select_strategy(
+    strategy_config: Dict,
+    backtest_service: BacktestService = Depends(get_backtest_service)
+):
+    """Select and configure trading strategy"""
+    try:
+        # Update strategy configuration
+        app_state["config"]["strategy"] = strategy_config
+        
+        # Initialize backtest service with updated config
+        backtest_service = BacktestService(app_state["config"]["strategy"])
+        
+        return {
+            "message": "Strategy updated successfully",
+            "config": strategy_config
+        }
+    except Exception as e:
+        logger.error(f"Error updating strategy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/strategy/compare")
+async def compare_strategies(
+    strategies: List[Dict],
+    backtest_service: BacktestService = Depends(get_backtest_service),
+    data_service: DataService = Depends(get_data_service)
+):
+    """Compare multiple trading strategies"""
+    try:
+        # Get test data
+        timeframe = app_state["config"]["model"].timeframe
+        timeframe_data = app_state["processed_data"][timeframe]
+        test_df = timeframe_data["splits"]["test"]
+        
+        results = {}
+        for i, strategy in enumerate(strategies):
+            # Update backtest config with strategy
+            backtest_service.strategy_config = strategy
+            
+            # Run backtest
+            backtest_results = backtest_service.simulate_trade(test_df.iloc[60:], strategies_signals[i])
+            
+            # Store results
+            results[f"strategy_{i+1}"] = {
+                "name": strategy.get("name", f"Strategy {i+1}"),
+                "config": strategy,
+                "performance": {
+                    "total_return": float(backtest_results["total_return"]),
+                    "sharpe_ratio": float(backtest_results["sharpe_ratio"]),
+                    "sortino_ratio": float(backtest_results["sortino_ratio"]),
+                    "max_drawdown": float(backtest_results["max_drawdown"]),
+                    "win_rate": float(backtest_results["win_rate"])
+                }
+            }
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error comparing strategies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/strategies")
+async def get_strategies(strategy_manager: StrategyManager = Depends(get_strategy_manager)):
+    """Get all available strategies"""
+    return strategy_manager.get_all_strategies()
+
+@app.post("/strategies")
+async def add_strategy(strategy_config: Dict, strategy_manager: StrategyManager = Depends(get_strategy_manager)):
+    """Add a new strategy"""
+    success = strategy_manager.add_strategy(strategy_config)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to add strategy")
+    return {"message": "Strategy added successfully", "name": strategy_config.get("name")}
+
+@app.put("/strategies/{name}")
+async def update_strategy(name: str, strategy_config: Dict, strategy_manager: StrategyManager = Depends(get_strategy_manager)):
+    """Update an existing strategy"""
+    success = strategy_manager.update_strategy(name, strategy_config)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
+    return {"message": "Strategy updated successfully", "name": name}
+
+@app.delete("/strategies/{name}")
+async def delete_strategy(name: str, strategy_manager: StrategyManager = Depends(get_strategy_manager)):
+    """Delete a strategy"""
+    success = strategy_manager.delete_strategy(name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
+    return {"message": "Strategy deleted successfully", "name": name}
+
+@app.post("/strategies/{name}/activate")
+async def activate_strategy(name: str, strategy_manager: StrategyManager = Depends(get_strategy_manager)):
+    """Set active strategy"""
+    success = strategy_manager.set_active_strategy(name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
+    return {"message": "Active strategy set successfully", "name": name}
+
+@app.get("/strategies/compare")
+async def compare_strategies(
+    strategy_manager: StrategyManager = Depends(get_strategy_manager),
+    backtest_service: BacktestService = Depends(get_backtest_service)
+):
+    """Compare all strategies"""
+    # Get test data
+    timeframe = app_state["config"]["model"].timeframe
+    timeframe_data = app_state["processed_data"][timeframe]
+    test_df = timeframe_data["splits"]["test"]
+    
+    # Compare strategies
+    results = strategy_manager.compare_strategies(backtest_service, test_df)
+    
+    return results    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

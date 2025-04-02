@@ -689,3 +689,172 @@ class BacktestService:
                 'win_rate': self.results['win_rate']
             }
         }
+    def add_strategy_indicators(self, df: pd.DataFrame, strategy_type: str) -> pd.DataFrame:
+        if strategy_type == "mean_reversion":
+            # Bollinger Bands
+            lookback = self.strategy_config.get("lookback", 20)
+            std_mult = self.strategy_config.get("std_mult", 2.0)
+            
+            df['MA'] = df['Close'].rolling(window=lookback).mean()
+            df['STD'] = df['Close'].rolling(window=lookback).std()
+            df['Upper'] = df['MA'] + (std_mult * df['STD'])
+            df['Lower'] = df['MA'] - (std_mult * df['STD'])
+            df['BB_Position'] = (df['Close'] - df['Lower']) / (df['Upper'] - df['Lower'])
+            
+            # RSI
+            delta = df['Close'].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.rolling(window=lookback).mean()
+            avg_loss = loss.rolling(window=lookback).mean()
+            rs = avg_gain / avg_loss.replace(0, 0.001)
+            df['RSI'] = 100 - (100 / (1 + rs))
+            
+        elif strategy_type == "trend_following":
+            # Moving Average Crossover
+            fast_period = self.strategy_config.get("fast_period", 9)
+            slow_period = self.strategy_config.get("slow_period", 21)
+            
+            df['Fast_MA'] = df['Close'].rolling(window=fast_period).mean()
+            df['Slow_MA'] = df['Close'].rolling(window=slow_period).mean()
+            df['MA_Cross'] = ((df['Fast_MA'] > df['Slow_MA']) & 
+                            (df['Fast_MA'].shift(1) <= df['Slow_MA'].shift(1))).astype(int)
+            
+            # ADX for trend strength
+            high_low = df['High'] - df['Low']
+            high_close = np.abs(df['High'] - df['Close'].shift())
+            low_close = np.abs(df['Low'] - df['Close'].shift())
+            ranges = pd.concat([high_low, high_close, low_close], axis=1)
+            true_range = np.max(ranges, axis=1)
+            df['ATR'] = true_range.rolling(14).mean()
+            
+        return df
+
+    def generate_strategy_signals(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Generate signals based on strategy type
+        
+        Args:
+            df: DataFrame with indicators
+            
+        Returns:
+            List of signal dictionaries
+        """
+        strategy_type = self.strategy_config.get("type", "custom")
+        signals = []
+        
+        if strategy_type == "mean_reversion":
+            # Mean reversion signals
+            for i, row in df.iterrows():
+                if pd.notna(row['BB_Position']) and pd.notna(row['RSI']):
+                    if row['BB_Position'] < 0.05 and row['RSI'] < 30:
+                        signals.append({
+                            'signal': 'Buy',
+                            'confidence': 0.8,
+                            'reason': 'mean_reversion_oversold'
+                        })
+                    elif row['BB_Position'] > 0.95 and row['RSI'] > 70:
+                        signals.append({
+                            'signal': 'Sell',
+                            'confidence': 0.8,
+                            'reason': 'mean_reversion_overbought'
+                        })
+                    else:
+                        signals.append({
+                            'signal': 'Hold',
+                            'confidence': 0.5,
+                            'reason': 'no_signal'
+                        })
+                else:
+                    signals.append({
+                        'signal': 'Hold',
+                        'confidence': 0.5,
+                        'reason': 'missing_data'
+                    })
+        
+        elif strategy_type == "trend_following":
+            # Trend following signals
+            for i, row in df.iterrows():
+                if pd.notna(row['Fast_MA']) and pd.notna(row['Slow_MA']):
+                    if row['MA_Cross'] == 1:
+                        signals.append({
+                            'signal': 'Buy',
+                            'confidence': 0.8,
+                            'reason': 'ma_crossover_bullish'
+                        })
+                    elif row['Fast_MA'] < row['Slow_MA'] and row['Fast_MA'].shift(1) > row['Slow_MA'].shift(1):
+                        signals.append({
+                            'signal': 'Sell',
+                            'confidence': 0.8,
+                            'reason': 'ma_crossover_bearish'
+                        })
+                    else:
+                        signals.append({
+                            'signal': 'Hold',
+                            'confidence': 0.5,
+                            'reason': 'no_signal'
+                        })
+                else:
+                    signals.append({
+                        'signal': 'Hold',
+                        'confidence': 0.5,
+                        'reason': 'missing_data'
+                    })
+        
+        return signals
+
+    def optimize_strategy(self, df: pd.DataFrame) -> Dict:
+        """
+        Optimize strategy parameters
+        
+        Args:
+            df: DataFrame with market data
+            
+        Returns:
+            Dictionary with optimal parameters
+        """
+        strategy_type = self.strategy_config.get("type", "custom")
+        
+        if strategy_type == "mean_reversion":
+            # Optimize mean reversion parameters
+            lookback_range = range(10, 31, 5)  # 10, 15, 20, 25, 30
+            std_range = [1.5, 2.0, 2.5, 3.0]
+            
+            best_sharpe = 0
+            best_params = {}
+            
+            for lookback in lookback_range:
+                for std_mult in std_range:
+                    # Update config
+                    test_config = self.strategy_config.copy()
+                    test_config.update({
+                        "lookback": lookback,
+                        "std_mult": std_mult
+                    })
+                    
+                    # Create temporary backtest service with this config
+                    temp_service = BacktestService(test_config)
+                    
+                    # Add indicators
+                    df_with_indicators = temp_service.add_strategy_indicators(df.copy(), strategy_type)
+                    
+                    # Generate signals
+                    signals = temp_service.generate_strategy_signals(df_with_indicators)
+                    
+                    # Run backtest
+                    results = temp_service.simulate_trade(df_with_indicators, signals)
+                    
+                    # Check if better
+                    if results['sharpe_ratio'] > best_sharpe:
+                        best_sharpe = results['sharpe_ratio']
+                        best_params = {
+                            "lookback": lookback,
+                            "std_mult": std_mult,
+                            "performance": {
+                                "sharpe_ratio": results['sharpe_ratio'],
+                                "total_return": results['total_return'],
+                                "max_drawdown": results['max_drawdown']
+                            }
+                        }
+            
+            return best_params

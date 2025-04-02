@@ -420,3 +420,72 @@ class SignalService:
             "avg_entropy": avg_entropy,
             "avg_latency_ms": avg_latency
         }
+    def generate_signal_with_strategy(self, prediction: Dict, latest_candle: Dict, 
+                                strategy_indicators: Dict) -> Dict:
+    # Get strategy type from config
+        strategy_type = self.config.get("strategy", {}).get("type", "model_only")
+        
+        # First get base signal from model
+        base_signal = self.generate_signal(prediction, latest_candle)
+        
+        # If no strategy overlay, return base signal
+        if strategy_type == "model_only":
+            return base_signal
+        
+        # Get confidence threshold
+        threshold = self.config.get("confidence_threshold", 0.75)
+        
+        # Apply strategy overlay
+        if strategy_type == "mean_reversion":
+            # Get mean reversion indicators
+            bb_position = strategy_indicators.get("bb_position", 0.5)
+            rsi = strategy_indicators.get("rsi", 50)
+            
+            # Adjust signal based on mean reversion
+            if bb_position < 0.1 and rsi < 30:
+                # Strong buy signal from mean reversion
+                if base_signal["signal"] == "Buy":
+                    # Strengthen buy signal
+                    return {
+                        "signal": "Buy",
+                        "confidence": max(base_signal["confidence"], 0.9),
+                        "reason": "model_and_mean_reversion_agree_buy"
+                    }
+                elif base_signal["signal"] == "Sell" and base_signal["confidence"] < threshold:
+                    # Override weak sell signal
+                    return {
+                        "signal": "Buy",
+                        "confidence": 0.8,
+                        "reason": "mean_reversion_override_buy"
+                    }
+                else:
+                    # Keep original signal
+                    return base_signal
+                    
+            elif bb_position > 0.9 and rsi > 70:
+                # Strong sell signal from mean reversion
+                if base_signal["signal"] == "Sell":
+                    # Strengthen sell signal
+                    return {
+                        "signal": "Sell",
+                        "confidence": max(base_signal["confidence"], 0.9),
+                        "reason": "model_and_mean_reversion_agree_sell"
+                    }
+                elif base_signal["signal"] == "Buy" and base_signal["confidence"] < threshold:
+                    # Override weak buy signal
+                    return {
+                        "signal": "Sell",
+                        "confidence": 0.8,
+                        "reason": "mean_reversion_override_sell"
+                    }
+                else:
+                    # Keep original signal
+                    return base_signal
+            else:
+                # No strong mean reversion signal
+                return base_signal
+        
+        # Other strategy types can be implemented similarly
+        
+        return base_signal
+    
