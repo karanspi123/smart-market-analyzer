@@ -137,3 +137,202 @@ For questions, reach out to your.email@example.com (mailto:your.email@example.co
 - Preview it in a Markdown viewer (e.g., GitHub) to confirm formatting.
 
 Let me know if you need further adjustments!
+# Smart Market Analyzer
+
+A modular, microservices-based system for analyzing market data, predicting stock prices, generating trading signals, and backtesting custom trading strategies.
+
+## Features
+
+- **Instrument Flexibility**: Analyze any stock or instrument with historical data
+- **Prediction Models**: Transformer with self-attention for price prediction, CNN for pattern recognition
+- **Timeframes**: Support for 1-minute, 5-minute, 15-minute, and 1-hour intervals
+- **Shannon Entropy**: Quantify prediction uncertainty and confidence
+- **Custom Data Handling**: User-defined train/test/validation splits and sampling rates
+- **Trading Signals**: Generate Buy/Sell/Hold signals with Decision Trees
+- **Backtesting**: Test strategies with metrics like Sharpe Ratio, Sortino Ratio, etc.
+- **Custom Strategies**: Configure stop-loss (e.g., ATR-based) and profit-taking (e.g., Fibonacci levels)
+- **Modular Architecture**: Microservices design for scalability and model swapping
+
+## Project Structure
+
+```
+smart-market-analyzer/
+├── src/
+│   ├── api/              # API endpoints
+│   ├── core/             # Core services
+│   ├── infrastructure/   # Infrastructure services
+│   └── trading/          # Trading services
+├── config/               # Configuration files
+├── deployment/           # Deployment files
+├── data/                 # Data storage
+├── logs/                 # Log files
+├── requirements.txt      # Python dependencies
+└── worker.py             # Background worker
+```
+
+## Prerequisites
+
+- Python 3.8+
+- Docker and Docker Compose (for containerization)
+- Redis (for caching and message broker)
+- MongoDB (for persistent storage)
+
+## Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/smart-market-analyzer.git
+   cd smart-market-analyzer
+   ```
+
+2. Set up the project structure:
+   ```bash
+   chmod +x setup_project.sh
+   ./setup_project.sh
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Fix imports:
+   ```bash
+   python fix_imports.py
+   ```
+
+## Configuration
+
+Edit `config/config.json` to configure the system according to your needs:
+
+```json
+{
+  "data": {
+    "csv_path": "data/nq_1min.csv",
+    "instrument": "NQ",
+    "split": {
+      "train": 0.7,
+      "val": 0.15,
+      "test": 0.15
+    },
+    "sample_rate": "1-minute"
+  },
+  "model": {
+    "price_model": "Transformer",
+    "pattern_model": "CNN",
+    "window_size": 60,
+    "bins": 10,
+    "num_heads": 4,
+    "d_model": 64,
+    "entropy_threshold": 0.75
+  },
+  "backtest": {
+    "strategy": {
+      "stop_loss": {
+        "type": "ATR",
+        "multiplier": 2,
+        "period": 14
+      },
+      "profit_take": {
+        "type": "Fibonacci",
+        "level": 0.618
+      }
+    },
+    "slippage": 0.001,
+    "max_position": 0.02,
+    "max_daily_loss": 0.05
+  }
+}
+```
+
+## Running the Application
+
+### Development Mode
+
+1. Start the API server:
+   ```bash
+   chmod +x start.sh
+   ./start.sh api
+   ```
+
+2. Start the worker service:
+   ```bash
+   ./start.sh worker
+   ```
+
+3. Or start both:
+   ```bash
+   ./start.sh both
+   ```
+
+### Production Mode (Docker)
+
+```bash
+./start.sh docker
+```
+
+## Usage
+
+1. Access the API documentation:
+   ```
+   http://localhost:8000/docs
+   ```
+
+2. Process historical data:
+   ```bash
+   curl -X POST "http://localhost:8000/data" -H "Content-Type: application/json" -d '{"csv_path": "data/sample.csv"}'
+   ```
+
+3. Check training status:
+   ```bash
+   curl "http://localhost:8000/training-status"
+   ```
+
+4. Generate predictions:
+   ```bash
+   curl -X POST "http://localhost:8000/predict" -H "Content-Type: application/json" -d '{"data": [{"Open": 4323.5, "High": 4323.75, "Low": 4323.25, "Close": 4323.5, "Volume": 19, "EMA9": 4323.66, "EMA21": 4322.29, "EMA220": 4318.87}, ...], "window_size": 60}'
+   ```
+
+5. Generate trading signals:
+   ```bash
+   curl -X POST "http://localhost:8000/signal" -H "Content-Type: application/json" -d '{"prediction": {"price_prediction": [4324.0], "pattern": [2], "pattern_labels": ["Positive"], "entropy": [0.6], "confidence": [0.9]}, "latest_candle": {"Close": 4323.5, "Volume": 19, "EMA9": 4323.66, "EMA21": 4322.29, "EMA220": 4318.87}}'
+   ```
+
+6. Run backtesting:
+   ```bash
+   curl -X POST "http://localhost:8000/backtest"
+   ```
+
+## Monitoring
+
+Access Grafana dashboards for monitoring:
+```
+http://localhost:3000
+Username: admin
+Password: smartmarket
+```
+
+## Troubleshooting
+
+1. Check logs:
+   ```bash
+   tail -f smart-market-analyzer/logs/worker.log
+   ```
+
+2. Check Docker container status:
+   ```bash
+   docker-compose -f smart-market-analyzer/deployment/docker-compose.yml ps
+   ```
+
+3. Reset the system:
+   ```bash
+   docker-compose -f smart-market-analyzer/deployment/docker-compose.yml down -v
+   ```
+
+## License
+
+[MIT License](LICENSE)
+
+## Contributing
+
+Pull requests are welcome! Please open an issue first to discuss changes.
