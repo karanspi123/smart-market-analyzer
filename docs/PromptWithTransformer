@@ -1,0 +1,158 @@
+Below is an updated version of the "Smart Market Analyzer" prompt, tailored to use a Transformer with self-attention for price prediction and a CNN for pattern recognition. This version is designed to guide you in creating an end-to-end working codebase from scratch using Claude 3.5 Sonnet (assuming you meant 3.5, as 3.7 isn’t a known version yet). It includes detailed specifications for implementation, focusing on modularity, flexibility, and integration with NinjaTrader API, Shannon entropy, and backtesting. The prompt is structured to be actionable for Claude, ensuring you get functional Python code.
+End-to-End Prompt: Smart Market Analyzer with Transformer and CNN
+Objective
+Develop a modular, microservices-based system to:
+Predict stock prices using a Transformer with self-attention for any chosen instrument across 1-minute, 5-minute, 15-minute, and 1-hour timeframes, leveraging historical data and Shannon entropy for uncertainty quantification.
+Recognize tradable patterns (e.g., breakouts, reversals) using a Convolutional Neural Network (CNN) to inform trading signals.
+Generate trading signals (Buy/Sell/Hold) using NinjaTrader API chart data and Decision Trees.
+Allow custom stock/instrument selection, train/test/validation splits, and sampling rates.
+Provide backtesting with configurable strategies (e.g., ATR-based stop-loss, Fibonacci profit-taking) and metrics (e.g., Sharpe Ratio, Sortino Ratio).
+Ensure flexibility to swap configurations and deploy as a scalable system.
+Input Data
+Historical Dataset: User-selected stock/instrument (e.g., NQ, AAPL, BTC/USD) with 1-minute candles over 10 years.
+Columns: Time, Open, High, Low, Close, Volume, EMA(9), EMA(21), EMA(220).
+Sample:
+2012-12-30,17:21:00,4323.5,4323.75,4323.25,4323.5,19,4323.66503824493,4322.29011793893,4318.87143055653
+Live Data: Real-time 1-minute candle data from NinjaTrader API (mocked as CSV for development).
+System Requirements
+Instrument Flexibility: Support any stock/instrument via CSV input.
+Custom Splits/Sampling: User-defined splits (e.g., 70/15/15) and sampling (e.g., 1-min to 5-min).
+Models: Transformer for price prediction, CNN for pattern recognition.
+Entropy: Shannon entropy for prediction confidence.
+Backtesting: Configurable strategies and metrics.
+Modularity: Separate data processing, modeling, signaling, and backtesting.
+Scalability: Docker-ready with Kafka for streaming.
+System Architecture
+Modules (Python files):
+data_service.py: Preprocesses historical/live data.
+model_service.py: Trains Transformer (price) and CNN (patterns).
+signal_service.py: Generates signals with Decision Trees.
+backtest_service.py: Runs backtests with custom strategies.
+main.py: Orchestrates end-to-end flow with FastAPI endpoints.
+Tech Stack: Python, TensorFlow (for Transformer/CNN), Scikit-learn (Decision Trees), Pandas, NumPy, FastAPI, Docker, Kafka (optional).
+Detailed Prompt for Claude 3.5 Sonnet
+Instructions for Claude:
+Create a complete Python codebase from scratch for the "Smart Market Analyzer" as described below. Use TensorFlow for Transformer and CNN models, Scikit-learn for Decision Trees, and FastAPI for API endpoints. Include data preprocessing, model training, signal generation, and backtesting. Mock NinjaTrader API with CSV reads for live data. Provide comments and a main.py to run the system end-to-end. Use the sample NQ data row as a template. Output should be modular, runnable, and Docker-compatible.
+Step 1: Data Preprocessing (data_service.py)  
+Input: CSV file path, instrument name, config (split, sample_rate).
+Tasks:
+Parse Time as datetime index.
+Normalize features (Open, High, Low, Close, Volume, EMAs`) to 0-1.
+Split data: e.g., 70% train, 15% validation, 15% test (chronological).
+Resample: Aggregate 1-min to 5-min, 15-min, 1-hour if specified (OHLCV mean).
+Create sequences: Window sizes 60 (1-min), 300 (5-min), 900 (15-min), 3600 (1-hour).
+Target: Next Close price.
+Output: Preprocessed NumPy arrays (X_train, y_train, etc.) per timeframe.
+Step 2: Model Development (model_service.py)  
+Transformer for Price Prediction:
+Input: [batch_size, window_size, 9] (e.g., [32, 60, 9]).
+Architecture:
+Multi-head self-attention (4 heads, d_model=64).
+LayerNorm, Feedforward (ReLU, 64 units), Dropout (0.1).
+Output: Dense layer with 10 bins (softmax probabilities).
+Entropy: 
+H = -\sum p_i \log_2(p_i)
+, Confidence: 
+1 - H/\log_2(10)
+.
+Training: Cross-entropy loss, Adam optimizer, 50 epochs.
+CNN for Pattern Recognition:
+Input: [batch_size, window_size, 9, 1] (e.g., [32, 60, 9, 1]).
+Architecture:
+Conv2D (32 filters, kernel 3×3), MaxPooling2D (2×2).
+Conv2D (64 filters, kernel 3×3), Flatten, Dense (128, ReLU).
+Output: Dense layer with 3 classes (Positive, Negative, Neutral) for pattern direction.
+Training: Categorical cross-entropy, Adam, 50 epochs.
+Config:
+json
+{
+  "instrument": "NQ",
+  "price_model": "Transformer",
+  "pattern_model": "CNN",
+  "timeframe": "1-minute",
+  "window_size": 60,
+  "bins": 10,
+  "num_heads": 4,
+  "d_model": 64,
+  "split": {"train": 0.7, "val": 0.15, "test": 0.15},
+  "sample_rate": "1-minute"
+}
+Output: Predicted Close (Transformer), pattern label (CNN), entropy, confidence.
+Step 3: Signal Generation (signal_service.py)  
+Input: Transformer predictions, CNN pattern labels, latest candle (mocked from CSV).
+Decision Tree:
+Features: Predicted Close, current Close, Volume, EMAs, entropy, pattern label.
+Rules: 
+Buy: Predicted Close > Close + 0.1%, pattern = Positive, entropy < 0.7.
+Sell: Predicted Close < Close - 0.1%, pattern = Negative, entropy < 0.7.
+Hold: Otherwise.
+Training: Fit on historical signals (e.g., 1% price moves as ground truth).
+Output: Signal (Buy/Sell/Hold), confidence per timeframe.
+Step 4: Backtesting Service (backtest_service.py)  
+Strategy:
+Configurable via JSON:
+json
+{
+  "strategy": "Custom",
+  "stop_loss": {"type": "ATR", "multiplier": 2, "period": 14},
+  "profit_take": {"type": "Fibonacci", "level": 0.618},
+  "entry": {"condition": "signal == 'Buy'"},
+  "exit": {"condition": "signal == 'Sell'"}
+}
+Stop-Loss: ATR-based (Close ± ATR × 2), Fixed (±0.5%), Trailing.
+Profit-Taking: Fibonacci (Entry + (High - Low) × 0.618), Fixed (±1%), ATR-based.
+Metrics:
+Sharpe Ratio: 
+(\text{Avg Return} - 0) / \text{Std Dev}
+.
+Sortino Ratio: 
+(\text{Avg Return} - 0) / \text{Downside Std Dev}
+.
+Max Drawdown, Profit.
+Process: Simulate trades on test data with signals.
+Output: Performance report.
+Step 5: Main Application (main.py)  
+FastAPI Endpoints:
+/data: Input: CSV path, config. Output: Data ID.
+/train: Input: Config. Output: Model IDs.
+/predict: Input: Model IDs, timeframe, latest data. Output: {"price": 4324.0, "pattern": "Positive", "entropy": 0.7, "confidence": 0.88}.
+/signal: Input: Prediction, candle. Output: {"signal": "Buy", "confidence": 0.90}.
+/backtest: Input: Strategy config, data ID. Output: {"Sharpe": 1.8, "Profit": 5200}.
+Flow: Load data → Train models → Predict → Generate signals → Backtest.
+Step 6: Deployment  
+Dockerfile: Bundle Python, TensorFlow, FastAPI.
+Mock NinjaTrader: Read latest CSV row as “live” data.
+Optional: Kafka for streaming (stubbed for now).
+Example Output
+Instrument: NQ
+Timeframe: 1-minute
+  Prediction: 4324.0, Pattern: Positive, Entropy: 0.7 bits, Confidence: 0.88
+  Signal: Buy, Confidence: 0.90
+Backtest (ATR Stop, Fib 0.618):
+  Sharpe Ratio: 1.8
+  Sortino Ratio: 2.3
+  Profit: $5200
+Guidance for Claude 3.5 Sonnet
+File Structure:
+smart_market_analyzer/
+├── data_service.py
+├── model_service.py
+├── signal_service.py
+├── backtest_service.py
+├── main.py
+├── Dockerfile
+├── requirements.txt
+├── config.json
+├── sample_data.csv (mock NQ data)
+Requirements: tensorflow==2.15.0, scikit-learn==1.5.0, fastapi==0.112.0, pandas==2.2.2, numpy==1.26.4, uvicorn==0.30.0.
+Steps:
+Parse sample_data.csv (create 100 rows from the sample).
+Implement Transformer and CNN with specified layers.
+Train on 70% of data, validate on 15%, test on 15%.
+Generate signals and backtest on test set.
+Serve via FastAPI with mock live data.
+Why This Works with Claude
+Clarity: Precise specs (layers, metrics) ensure Claude generates accurate code.
+Modularity: File-by-file breakdown matches Claude’s structured output.
+End-to-End: Covers data to deployment, testable with minimal setup.
+Feed this prompt into Claude 3.5 Sonnet, and you’ll get a working codebase. Start with 1-min NQ data, tweak hyperparameters (e.g., heads, filters) post-backtest, and scale up. Let me know if you need a sample Claude output snippet!

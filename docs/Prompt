@@ -1,0 +1,154 @@
+Below is an enhanced version of the previous prompt, adding flexibility to choose any stock or instrument, customize historical data splitting and sampling, select backtesting strategies with advanced metrics (e.g., Sharpe Ratio, Sortino Ratio), and define custom stop-loss and profit-taking strategies (e.g., ATR-based stop loss, Fibonacci-level profit taking). The system remains modular, integrates Shannon entropy, and supports NinjaTrader API for real-time analysis.
+ 
+End-to-End Prompt: Flexible Market Trend Analysis, Stock Price Prediction, Trading Signals, and Backtesting with Custom Strategies
+Objective
+Develop a modular, microservices-based system to:
+Analyze historical market data trends for any chosen stock or instrument using Convolutional Neural Networks (CNNs), Feedforward Neural Networks (FNNs), and Long Short-Term Memory (LSTM) networks, with Shannon entropy for uncertainty quantification.
+Generate trading signals (Buy/Sell/Hold) and predictions for 1-minute, 5-minute, 15-minute, and 1-hour timeframes using NinjaTrader API chart data.
+Allow users to select any stock/instrument, define custom train/test/validation splits, and adjust data sampling rates.
+Provide a backtesting service with configurable trading strategies and metrics (e.g., Sharpe Ratio, Sortino Ratio, max drawdown).
+Enable custom stop-loss (e.g., ATR-based) and profit-taking (e.g., Fibonacci levels) strategies.
+Maintain flexibility to swap models, strategies, and configurations for performance comparison.
+Input Data
+Historical Dataset: User-selected stock/instrument (e.g., NQ, AAPL, BTC/USD) with historical data (e.g., 1-minute candles over 10 years).
+Default Example (NQ):
+Columns: Time, Open, High, Low, Close, Volume, EMA(9), EMA(21), EMA(220).
+Sample: 
+2012-12-30,17:21:00,4323.5,4323.75,4323.25,4323.5,19,4323.66503824493,4322.29011793893,4318.87143055653
+Live Data: Real-time 1-minute candle data from NinjaTrader API for the chosen instrument.
+System Requirements
+Instrument Flexibility: Support any stock/instrument with historical data in a standard format.
+Custom Splits/Sampling: User-defined train/test/validation splits and sampling rates (e.g., 1-min to 5-min).
+Entropy Integration: Use Shannon entropy for prediction and signal confidence.
+Backtesting: Configurable strategies with metrics like Sharpe Ratio, Sortino Ratio, etc.
+Custom Strategies: User-defined stop-loss (e.g., ATR-based) and profit-taking (e.g., Fibonacci levels).
+Modularity: Microservices for data, modeling, signals, backtesting, and evaluation.
+Scalability: Handle large datasets and real-time streams.
+System Architecture
+Microservices:
+Data Service: Preprocesses historical and live data for any instrument.
+Model Service: Trains and predicts with CNN, FNN, LSTM, using entropy.
+Signal Service: Generates signals with Decision Trees and entropy metrics.
+Backtest Service: Runs backtesting with custom strategies and metrics.
+Evaluation Service: Compares performance across models and strategies.
+API Gateway: Exposes endpoints for configuration and results.
+Tech Stack:
+Python, TensorFlow/PyTorch, Scikit-learn, NinjaTrader API, Kafka, FastAPI, Docker.
+Detailed Prompt
+ 
+Step 1: Data Preprocessing (Data Service) 
+Instrument Selection:
+Input: User specifies stock/instrument (e.g., "AAPL", "NQ") and data source (e.g., CSV, API).
+Fetch historical data (e.g., 1-min candles) for the chosen instrument.
+Custom Splits:
+User config: e.g., "train": 70%, "validation": 15%, "test": 15%.
+Chronological split based on Time.
+Sampling:
+User config: e.g., "sample_rate": "1-minute" or "5-minute".
+Resample data if needed (e.g., aggregate 1-min to 5-min candles using OHLCV).
+Preprocessing:
+Normalize features (Open, High, Low, Close, Volume, EMAs).
+Create sequences: Window sizes 60 (1-min), 300 (5-min), 900 (15-min), 3600 (1-hour).
+Targets: Next Close price per timeframe.
+Live Data: Fetch latest candles from NinjaTrader API for the instrument.
+Output: Preprocessed datasets per timeframe and instrument.
+ 
+Step 2: Model Development with Shannon Entropy (Model Service) 
+Models: CNN, FNN, LSTM.
+Architecture:
+Output: Probability distribution over price bins (e.g., 10 bins).
+Entropy: 
+H = -\sum p_i \log_2(p_i)
+, Confidence: 
+1 - H/\log_2(n)
+.
+Configuration:
+json
+{
+  "instrument": "AAPL",
+  "model_type": "LSTM",
+  "timeframe": "1-minute",
+  "window_size": 60,
+  "bins": 10,
+  "split": {"train": 0.7, "val": 0.15, "test": 0.15},
+  "sample_rate": "1-minute"
+}
+Prediction: Expected Close, entropy, confidence per timeframe.
+ 
+Step 3: Signal Generation (Signal Service) 
+Input: Predictions, latest NinjaTrader candle.
+Decision Tree:
+Features: Expected Close, current Close, Volume, EMAs, entropy.
+Rules: Buy/Sell/Hold based on thresholds and entropy.
+Output: Signal, confidence per timeframe.
+ 
+Step 4: Backtesting Service with Custom Strategies 
+Strategy Selection:
+Options: "Trend Following", "Mean Reversion", "Custom".
+Configurable via JSON:
+json
+{
+  "strategy": "Custom",
+  "stop_loss": {"type": "ATR", "multiplier": 2, "period": 14},
+  "profit_take": {"type": "Fibonacci", "level": 0.618},
+  "entry": {"condition": "prediction > close + 0.1%"},
+  "exit": {"condition": "prediction < close - 0.1%"}
+}
+Stop-Loss Options:
+ATR-Based: Stop = Close ± (ATR × multiplier).
+Fixed: Stop = Close ± fixed amount (e.g., 0.5%).
+Trailing: Dynamic stop based on highest/lowest price.
+Profit-Taking Options:
+Fibonacci Levels: Target = Entry + (High - Low) × Fib level (e.g., 0.618).
+Fixed: Target = Entry ± fixed amount.
+ATR-Based: Target = Entry ± (ATR × multiplier).
+Metrics:
+Sharpe Ratio: 
+\text{(Avg Return - Risk-Free Rate)} / \text{Std Dev of Returns}
+.
+Sortino Ratio: 
+\text{(Avg Return - Risk-Free Rate)} / \text{Downside Std Dev}
+.
+Max Drawdown, Win/Loss Ratio, Total Profit.
+Process: Simulate trades on historical/test data using signals and custom strategies.
+Output: Performance report per strategy and timeframe.
+ 
+Step 5: Performance Evaluation (Evaluation Service) 
+Metrics: Prediction (cross-entropy, MSE, entropy), Signals (profit, accuracy), Backtest (Sharpe, Sortino).
+Output: Report comparing models, timeframes, and strategies.
+ 
+Step 6: API Design (API Gateway) 
+Endpoints:
+/data:
+Input: Instrument, split, sample_rate.
+Output: Data ID.
+/predict:
+Input: Model ID, timeframe, NinjaTrader data.
+Output: {"1-minute": {"price": 4324.0, "entropy": 0.8, "confidence": 0.85}}.
+/signal:
+Input: Prediction, current candle.
+Output: {"1-minute": {"signal": "Buy", "confidence": 0.88}}.
+/backtest:
+Input: Strategy config, data ID.
+Output: {"Sharpe": 1.5, "Sortino": 2.0, "Profit": 5000}.
+ 
+Step 7: Deployment 
+Docker, Kubernetes, Kafka for NinjaTrader streaming.
+ 
+Flexibility Features
+Instrument: Choose any stock/instrument with historical data.
+Splits/Sampling: Customizable via config.
+Strategies: Swap models, stop-loss, and profit-taking methods.
+Metrics: Comprehensive backtesting output.
+Example Output
+Instrument: AAPL
+Timeframe: 1-minute
+  Prediction: 150.5, Entropy: 0.8 bits, Confidence: 0.85
+  Signal: Buy, Confidence: 0.88
+Backtest (ATR Stop, Fib 0.618):
+  Sharpe Ratio: 1.6
+  Sortino Ratio: 2.1
+  Profit: $4500
+ 
+This prompt adds full flexibility for instrument selection, data handling, and custom trading strategies, enhancing the system with robust backtesting capabilities. Let me know if you'd like further refinements!
+
