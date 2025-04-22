@@ -1,5 +1,3 @@
-**ShambhoAlgoTrader
-
 **Smart Market Analyzer** is a modular, microservices-based system for analyzing historical and real-time market data, predicting stock prices, generating trading signals, and backtesting custom trading strategies. Built with flexibility in mind, it supports any stock or instrument, integrates Shannon entropy for uncertainty quantification, and leverages the NinjaTrader API for real-time data. Users can customize models (CNN, FNN, LSTM), data splits, sampling rates, stop-loss/profit-taking strategies, and backtesting metrics like Sharpe and Sortino ratios.
 
 ## Features
