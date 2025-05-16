@@ -11,10 +11,14 @@ import time
 from datetime import datetime, timedelta
 
 # Import services
-from data_service import DataService
-from model_service import ModelService
-from signal_service import SignalService
-from backtest_service import BacktestService
+# Import services
+from src.core.data_service import DataService
+from src.core.model_service import ModelService
+from src.core.signal_service import SignalService
+from src.core.backtest_service import BacktestService
+from src.core.strategy_manager import StrategyManager
+
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -116,6 +120,12 @@ def get_backtest_service():
         backtest_config = app_state["config"].get("backtest", BacktestConfig()).dict()
         app_state["backtest_service"] = BacktestService(backtest_config)
     return app_state["backtest_service"]
+
+def get_strategy_manager():
+    if "strategy_manager" not in app_state:
+        app_state["strategy_manager"] = StrategyManager()
+    return app_state["strategy_manager"]
+
 
 # Background task for training models
 async def train_models_task():

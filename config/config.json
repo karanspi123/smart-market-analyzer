@@ -1,6 +1,6 @@
 {
     "data": {
-      "csv_path": "data/nq_1min.csv",
+      "csv_path": "data/market/NQ_1_Minute.csv",
       "instrument": "NQ",
       "split": {
         "train": 0.7,
