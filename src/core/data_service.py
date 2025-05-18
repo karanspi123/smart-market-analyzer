@@ -62,43 +62,52 @@ class DataService:
         if os.path.exists(fallback_path):
             return fallback_path
         return None
-    
+
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Preprocess data:
         - Convert Time to datetime index
         - Validate data
         - Handle missing values and outliers
-        
+
         Args:
             df: Input DataFrame
-            
+
         Returns:
             Preprocessed DataFrame
         """
         logger.info("Starting data preprocessing")
-        
+
         # Convert Time to datetime index
         if 'Time' in df.columns:
-            df['Time'] = pd.to_datetime(df['Time'])
-            df.set_index('Time', inplace=True)
-        
+            # Explicitly specify format to avoid warnings
+            if 'Date' in df.columns:
+                # If we have both Date and Time columns, combine them
+                df['DateTime'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], format='%Y-%m-%d %H:%M:%S',
+                                                errors='coerce')
+                df.set_index('DateTime', inplace=True)
+                df.drop(columns=['Date', 'Time'], inplace=True, errors='ignore')
+            else:
+                # If we only have Time column
+                df['Time'] = pd.to_datetime(df['Time'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+                df.set_index('Time', inplace=True)
+
         # Check for missing values
         missing_values = df.isnull().sum()
         if missing_values.any():
             logger.warning(f"Missing values detected: {missing_values}")
             # Fill missing values with linear interpolation
             df = df.interpolate(method='linear')
-        
+
         # Check for outliers
         df = self._handle_outliers(df)
-        
+
         # Filter by liquidity
         if 'Volume' in df.columns:
             df = df[df['Volume'] >= 100]
-            
+
         return df
-    
+
     def _handle_outliers(self, df: pd.DataFrame) -> pd.DataFrame:
         """Handle outliers in the data"""
         # Check for invalid OHLC relationships (High < Low)
@@ -172,14 +181,14 @@ class DataService:
                         resampled[timeframe][ema_col] = df[ema_col].resample(rule).last()
         
         return resampled
-    
+
     def create_regime_aware_split(self, df: pd.DataFrame) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:
         """
         Create train/val/test splits that are aware of market regimes
-        
+
         Args:
             df: Input DataFrame
-            
+
         Returns:
             Dictionary with split DataFrames and regime info
         """
@@ -187,74 +196,83 @@ class DataService:
         train_pct = self.config.get('split', {}).get('train', 0.7)
         val_pct = self.config.get('split', {}).get('val', 0.15)
         test_pct = self.config.get('split', {}).get('test', 0.15)
-        
+
+        # Make a copy of the dataframe to avoid modifying the original
+        df_copy = df.copy()
+
         # Calculate returns for regime clustering
-        df['returns'] = df['Close'].pct_change()
-        
+        df_copy['returns'] = df_copy['Close'].pct_change()
+
         # Use a rolling window to calculate volatility
-        df['volatility'] = df['returns'].rolling(window=20).std()
-        
-        # Create features for regime clustering
-        cluster_features = df[['returns', 'volatility']].dropna()
-        
-        # K-means clustering to identify regimes
-        kmeans = KMeans(n_clusters=3, random_state=42)
-        cluster_features_scaled = MinMaxScaler().fit_transform(cluster_features)
-        df.loc[cluster_features.index, 'regime'] = kmeans.fit_predict(cluster_features_scaled)
-        
-        # Fill any missing regime values with forward fill
-        df['regime'] = df['regime'].ffill().fillna(0).astype(int)
-        
+        df_copy['volatility'] = df_copy['returns'].rolling(window=20).std()
+
+        # Create features for regime clustering - drop rows with NaN values
+        df_copy = df_copy.dropna(subset=['returns', 'volatility'])
+
+        # Initialize regime column with zeros
+        df_copy['regime'] = 0
+
+        # Only perform clustering if we have enough data
+        if len(df_copy) >= 3:  # Need at least 3 points for 3 clusters
+            # K-means clustering to identify regimes
+            kmeans = KMeans(n_clusters=min(3, len(df_copy)), random_state=42)
+            cluster_features = df_copy[['returns', 'volatility']]
+            cluster_features_scaled = MinMaxScaler().fit_transform(cluster_features)
+
+            # Fit and predict
+            df_copy['regime'] = kmeans.fit_predict(cluster_features_scaled)
+
         # Get regimes and their counts
-        regimes = df['regime'].unique()
-        regime_counts = {regime: (df['regime'] == regime).sum() for regime in regimes}
+        regimes = df_copy['regime'].unique()
+        regime_counts = {int(regime): (df_copy['regime'] == regime).sum() for regime in regimes}
         logger.info(f"Identified regimes with counts: {regime_counts}")
-        
+
         # First do a chronological split
-        n = len(df)
+        n = len(df_copy)
         train_end = int(n * train_pct)
         val_end = train_end + int(n * val_pct)
-        
-        train_df = df.iloc[:train_end]
-        val_df = df.iloc[train_end:val_end]
-        test_df = df.iloc[val_end:]
-        
+
+        train_df = df_copy.iloc[:train_end]
+        val_df = df_copy.iloc[train_end:val_end]
+        test_df = df_copy.iloc[val_end:]
+
         # Check regime representation
         train_regimes = set(train_df['regime'].unique())
         val_regimes = set(val_df['regime'].unique())
         test_regimes = set(test_df['regime'].unique())
-        
+
         all_regimes = set(regimes)
-        
+
         # If any split is missing a regime, adjust splits
-        if (train_regimes != all_regimes or 
-            val_regimes != all_regimes or 
-            test_regimes != all_regimes):
-            
+        if (train_regimes != all_regimes or
+                val_regimes != all_regimes or
+                test_regimes != all_regimes):
+
             logger.warning("Regimes not represented in all splits, adjusting...")
-            
+
             # Ensure representation by adding samples from each regime
             for regime in all_regimes:
-                regime_indices = df[df['regime'] == regime].index
+                regime_indices = df_copy[df_copy['regime'] == regime].index.tolist()
+
                 if regime not in train_regimes and len(regime_indices) > 0:
-                    sample_idx = np.random.choice(regime_indices, min(100, len(regime_indices)))
-                    train_df = pd.concat([train_df, df.loc[sample_idx]])
-                
+                    sample_idx = np.random.choice(regime_indices, min(100, len(regime_indices)), replace=False)
+                    train_df = pd.concat([train_df, df_copy.loc[sample_idx]])
+
                 if regime not in val_regimes and len(regime_indices) > 0:
-                    sample_idx = np.random.choice(regime_indices, min(50, len(regime_indices)))
-                    val_df = pd.concat([val_df, df.loc[sample_idx]])
-                    
+                    sample_idx = np.random.choice(regime_indices, min(50, len(regime_indices)), replace=False)
+                    val_df = pd.concat([val_df, df_copy.loc[sample_idx]])
+
                 if regime not in test_regimes and len(regime_indices) > 0:
-                    sample_idx = np.random.choice(regime_indices, min(50, len(regime_indices)))
-                    test_df = pd.concat([test_df, df.loc[sample_idx]])
-        
+                    sample_idx = np.random.choice(regime_indices, min(50, len(regime_indices)), replace=False)
+                    test_df = pd.concat([test_df, df_copy.loc[sample_idx]])
+
         # Remove auxiliary columns used for regime detection
         for split_df in [train_df, val_df, test_df]:
             if 'returns' in split_df.columns:
                 split_df.drop(columns=['returns'], inplace=True)
             if 'volatility' in split_df.columns:
                 split_df.drop(columns=['volatility'], inplace=True)
-        
+
         return {
             'train': train_df.sort_index(),
             'val': val_df.sort_index(),
@@ -265,7 +283,7 @@ class DataService:
             'regimes_in_val': list(val_df['regime'].unique()),
             'regimes_in_test': list(test_df['regime'].unique())
         }
-    
+
     def prepare_model_inputs(self, splits: Dict[str, pd.DataFrame]) -> Dict[str, Dict]:
         """
         Prepare model inputs with sequences and targets
@@ -308,109 +326,101 @@ class DataService:
                 }
                 
         return result
-    
+
     def process_data(self, csv_path: str) -> Dict:
         """
         Main method to process data end-to-end
-        
+
         Args:
             csv_path: Path to CSV file
-            
+
         Returns:
             Dictionary with processed data
         """
-        # Load data
-        df = self.load_data(csv_path)
-        if df is None:
-            raise ValueError("Failed to load data")
-        
-        # Preprocess
-        df = self.preprocess(df)
-        
-        # Normalize
-        df_normalized = self.normalize_features(df)
-        
-        # Resample if needed
-        resampled_data = self.resample_data(df_normalized)
-        
-        # Create splits for each timeframe
-        result = {}
-        for timeframe, timeframe_df in resampled_data.items():
-            logger.info(f"Processing {timeframe} data")
-            
-            # Create regime-aware splits
-            splits, regime_info = self.create_regime_aware_split(timeframe_df)
-            
-            # Prepare inputs for model
-            model_inputs = self.prepare_model_inputs(splits)
-            
-            result[timeframe] = {
-                'splits': splits,
-                'model_inputs': model_inputs,
-                'regime_info': regime_info,
-                'feature_scaler': self.scaler
-            }
-        
-        return result
-    
-    def generate_mock_data(self, sample_row: str, num_rows: int = 100) -> pd.DataFrame:
-        """
-        Generate mock data based on a sample row
-        
-        Args:
-            sample_row: Sample row string
-            num_rows: Number of rows to generate
-            
-        Returns:
-            DataFrame with mock data
-        """
+        try:
+            # Load data
+            df = self.load_data(csv_path)
+            if df is None:
+                raise ValueError("Failed to load data")
+
+            # Check if dataframe is empty
+            if df.empty or len(df) < 10:  # Ensure we have at least some minimum number of rows
+                raise ValueError("Dataset is empty or too small for processing")
+
+            # Preprocess
+            df = self.preprocess(df)
+            logger.info(f"After preprocessing: DataFrame shape = {df.shape}")
+
+            # Normalize
+            df_normalized = self.normalize_features(df)
+            logger.info(f"After normalization: DataFrame shape = {df_normalized.shape}")
+
+            # Resample if needed
+            resampled_data = self.resample_data(df_normalized)
+
+            # Create splits for each timeframe
+            result = {}
+            for timeframe, timeframe_df in resampled_data.items():
+                logger.info(f"Processing {timeframe} data with shape {timeframe_df.shape}")
+
+                # Create regime-aware splits
+                splits, regime_info = self.create_regime_aware_split(timeframe_df)
+
+                # Prepare inputs for model
+                model_inputs = self.prepare_model_inputs(splits)
+
+                result[timeframe] = {
+                    'splits': splits,
+                    'model_inputs': model_inputs,
+                    'regime_info': regime_info,
+                    'feature_scaler': self.scaler
+                }
+
+            return result
+        except Exception as e:
+            logger.error(f"Error in process_data: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+
+    def generate_mock_data(self, sample_row, num_rows=1000):
+        """Generate mock data based on a sample row"""
         # Parse sample row
-        columns = ["Time", "Open", "High", "Low", "Close", "Volume", "EMA9", "EMA21", "EMA220"]
-        sample_values = sample_row.split(',')
-        
+        parts = sample_row.split(',')
+        date, time, open_price, high, low, close, volume, ema9, ema21, ema220 = parts
+
         # Create base dataframe
-        base_time = pd.to_datetime(sample_values[0] + " " + sample_values[1])
-        times = [base_time + datetime.timedelta(minutes=i) for i in range(num_rows)]
-        
-        # Initialize with sample values
-        data = {
-            "Time": times,
-            "Open": float(sample_values[2]),
-            "High": float(sample_values[3]),
-            "Low": float(sample_values[4]),
-            "Close": float(sample_values[5]),
-            "Volume": int(sample_values[6]),
-            "EMA9": float(sample_values[7]),
-            "EMA21": float(sample_values[8]),
-            "EMA220": float(sample_values[9]) if len(sample_values) > 9 else float(sample_values[8])
-        }
-        
-        df = pd.DataFrame(data)
-        
-        # Generate random walk for prices
-        volatility = data["Close"] * 0.001  # 0.1% volatility
-        
+        base_date = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M:%S")
+        dates = [base_date + timedelta(minutes=i) for i in range(num_rows)]
+
+        # Generate random price movements
+        np.random.seed(42)  # For reproducibility
+        close_prices = [float(close)]
         for i in range(1, num_rows):
-            prev_close = df.loc[i-1, "Close"]
-            # Random price change with mean 0
-            price_change = np.random.normal(0, volatility)
-            
-            # Update OHLC with random walk
-            df.loc[i, "Close"] = prev_close + price_change
-            df.loc[i, "Open"] = df.loc[i-1, "Close"] + np.random.normal(0, volatility*0.5)
-            df.loc[i, "High"] = max(df.loc[i, "Open"], df.loc[i, "Close"]) + abs(np.random.normal(0, volatility*0.3))
-            df.loc[i, "Low"] = min(df.loc[i, "Open"], df.loc[i, "Close"]) - abs(np.random.normal(0, volatility*0.3))
-            
-            # Generate realistic volume
-            df.loc[i, "Volume"] = int(abs(np.random.normal(data["Volume"], data["Volume"]*0.3)))
-            
-            # Update EMAs
-            alpha9 = 2 / (9 + 1)
-            alpha21 = 2 / (21 + 1)
-            alpha220 = 2 / (220 + 1)
-            
-            df.loc[i, "EMA9"] = df.loc[i-1, "EMA9"] * (1 - alpha9) + df.loc[i, "Close"] * alpha9
-            df.loc[i, "EMA21"] = df.loc[i-1, "EMA21"] * (1 - alpha21) + df.loc[i, "Close"] * alpha21
-            df.loc[i, "EMA220"] = df.loc[i-1, "EMA220"] * (1 - alpha220) + df.loc[i, "Close"] * alpha220
-        
+            # Random walk with drift
+            change = np.random.normal(0.01, 0.1)  # Mean positive drift
+            new_price = close_prices[-1] * (1 + change)
+            close_prices.append(new_price)
+
+        # Generate OHLC data
+        df = pd.DataFrame({
+            'Date': [d.strftime("%Y-%m-%d") for d in dates],
+            'Time': [d.strftime("%H:%M:%S") for d in dates],
+            'Open': [p * (1 + np.random.normal(0, 0.001)) for p in close_prices],
+            'High': [p * (1 + abs(np.random.normal(0, 0.002))) for p in close_prices],
+            'Low': [p * (1 - abs(np.random.normal(0, 0.002))) for p in close_prices],
+            'Close': close_prices,
+            'Volume': [int(abs(np.random.normal(int(volume), int(volume) * 0.1))) for _ in range(num_rows)],
+        })
+
+        # Ensure High is the highest price
+        df['High'] = df[['Open', 'High', 'Close']].max(axis=1)
+        # Ensure Low is the lowest price
+        df['Low'] = df[['Open', 'Low', 'Close']].min(axis=1)
+
+        # Calculate EMAs
+        df['EMA9'] = df['Close'].ewm(span=9, adjust=False).mean()
+        df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
+        df['EMA220'] = df['Close'].ewm(span=220, adjust=False).mean()
+
         return df

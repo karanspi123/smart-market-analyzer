@@ -101,25 +101,32 @@ app_state = {
 # Helper to get services
 def get_data_service():
     if app_state["data_service"] is None and app_state["config"] is not None:
-        app_state["data_service"] = DataService(app_state["config"]["data"].dict())
+        # Access the data attribute of the Config object
+        config_data = app_state["config"].data
+        app_state["data_service"] = DataService(config_data.dict())
     return app_state["data_service"]
 
 def get_model_service():
     if app_state["model_service"] is None and app_state["config"] is not None:
-        app_state["model_service"] = ModelService(app_state["config"]["model"].dict())
+        # Access the model attribute of the Config object
+        config_model = app_state["config"].model
+        app_state["model_service"] = ModelService(config_model.dict())
     return app_state["model_service"]
 
 def get_signal_service():
     if app_state["signal_service"] is None and app_state["config"] is not None:
-        combined_config = {**app_state["config"]["model"].dict()}
-        app_state["signal_service"] = SignalService(combined_config)
+        # Access the model attribute of the Config object
+        config_model = app_state["config"].model
+        app_state["signal_service"] = SignalService(config_model.dict())
     return app_state["signal_service"]
 
 def get_backtest_service():
     if app_state["backtest_service"] is None and app_state["config"] is not None:
-        backtest_config = app_state["config"].get("backtest", BacktestConfig()).dict()
-        app_state["backtest_service"] = BacktestService(backtest_config)
+        # Access the backtest attribute of the Config object
+        backtest_config = app_state["config"].backtest or BacktestConfig()
+        app_state["backtest_service"] = BacktestService(backtest_config.dict())
     return app_state["backtest_service"]
+
 
 def get_strategy_manager():
     if "strategy_manager" not in app_state:
@@ -128,57 +135,65 @@ def get_strategy_manager():
 
 
 # Background task for training models
+# Background task for training models
 async def train_models_task():
     try:
         app_state["training_state"] = "in_progress"
         logger.info("Starting model training")
-        
+
         # Get processed data
         processed_data = app_state["processed_data"]
-        timeframe = app_state["config"]["model"].timeframe
+
+        # Access the model attribute of the Config object
+        config = app_state["config"]
+        timeframe = config.model.timeframe
+
         timeframe_data = processed_data[timeframe]
-        
+
         # Get model inputs
         model_inputs = timeframe_data["model_inputs"]
         X_train, y_train = model_inputs["train"]["X"], model_inputs["train"]["y"]
         X_val, y_val = model_inputs["val"]["X"], model_inputs["val"]["y"]
-        
+
         # Train models
         model_service = get_model_service()
         training_results = model_service.train_models(X_train, y_train, X_val, y_val)
-        
+
         # Store trained models
         app_state["trained_models"] = training_results
         app_state["training_state"] = "completed"
         logger.info("Model training completed successfully")
-        
+
         # Train signal service decision tree
         signal_service = get_signal_service()
-        
+
         # Prepare data for decision tree
         train_df = timeframe_data["splits"]["train"]
-        
+
         # Generate predictions for training data
         train_predictions = []
         batch_size = 100
         for i in range(0, len(X_train), batch_size):
-            batch_X = X_train[i:i+batch_size]
+            batch_X = X_train[i:i + batch_size]
             batch_predictions = model_service.predict(batch_X)
             train_predictions.extend([batch_predictions for _ in range(len(batch_X))])
-        
+
         # Prepare decision tree features and labels
         X_decision_tree, y_decision_tree = signal_service.prepare_training_data(
-            train_df, train_predictions[:len(train_df)-60]  # Adjust for window size
+            train_df, train_predictions[:len(train_df) - 60]  # Adjust for window size
         )
-        
+
         # Train decision tree
         signal_service.train_decision_tree(X_decision_tree, y_decision_tree)
         logger.info("Signal service decision tree trained successfully")
-        
+
     except Exception as e:
         app_state["training_state"] = "failed"
         logger.error(f"Model training failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise
+
 
 # Routes
 @app.post("/config")
@@ -188,6 +203,7 @@ async def set_config(config: Config):
     logger.info(f"Configuration set: {config.dict()}")
     return {"message": "Configuration set successfully"}
 
+
 @app.post("/data")
 async def process_data(background_tasks: BackgroundTasks, data_service: DataService = Depends(get_data_service)):
     """Process data from CSV file"""
@@ -195,39 +211,56 @@ async def process_data(background_tasks: BackgroundTasks, data_service: DataServ
         config = app_state["config"]
         if config is None:
             raise HTTPException(status_code=400, detail="Configuration not set")
-        
+
         csv_path = config.data.csv_path
-        
+
         # Check if the file exists
         if not os.path.exists(csv_path):
             # Generate mock data if file doesn't exist
             sample_row = "2012-12-30,17:21:00,4323.5,4323.75,4323.25,4323.5,19,4323.66503824493,4322.29011793893,4318.87143055653"
             logger.info(f"CSV file not found, generating mock data with sample: {sample_row}")
-            
+
             df = data_service.generate_mock_data(sample_row, num_rows=1000)
-            
+
             # Save mock data to CSV
             os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-            df.to_csv(csv_path, index=True)
+            df.to_csv(csv_path, index=False)  # Changed to index=False to match expected format
             logger.info(f"Generated mock data saved to {csv_path}")
-        
+
+        # Verify the file has content
+        file_size = os.path.getsize(csv_path)
+        if file_size == 0:
+            logger.warning(f"CSV file {csv_path} is empty, generating mock data instead")
+            sample_row = "2012-12-30,17:21:00,4323.5,4323.75,4323.25,4323.5,19,4323.66503824493,4322.29011793893,4318.87143055653"
+            df = data_service.generate_mock_data(sample_row, num_rows=1000)
+            df.to_csv(csv_path, index=False)
+            logger.info(f"Generated mock data saved to {csv_path}")
+
         # Process data
         logger.info(f"Processing data from {csv_path}")
         processed_data = data_service.process_data(csv_path)
         app_state["processed_data"] = processed_data
-        
+
         # Start training models in background
         background_tasks.add_task(train_models_task)
-        
+
         return {
             "message": "Data processed successfully, model training started",
             "timeframes": list(processed_data.keys()),
             "samples": {tf: len(data["splits"]["train"]) for tf, data in processed_data.items()}
         }
-        
+
+    except ValueError as e:
+        logger.error(f"Data validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error processing data: {e}")
+        # Log more details about the exception
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.get("/training-status")
 async def get_training_status():
@@ -328,22 +361,25 @@ async def generate_signal(request: SignalRequest, signal_service: SignalService 
         logger.error(f"Error generating signal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/backtest")
 async def run_backtest(
-    backtest_service: BacktestService = Depends(get_backtest_service),
-    model_service: ModelService = Depends(get_model_service),
-    signal_service: SignalService = Depends(get_signal_service)
+        backtest_service: BacktestService = Depends(get_backtest_service),
+        model_service: ModelService = Depends(get_model_service),
+        signal_service: SignalService = Depends(get_signal_service)
 ):
     """Run backtest with trained models"""
     try:
         if app_state["trained_models"] is None:
             raise HTTPException(status_code=400, detail="Models not trained yet")
-        
+
         if app_state["processed_data"] is None:
             raise HTTPException(status_code=400, detail="No processed data available")
-        
+
         # Get test data
-        timeframe = app_state["config"]["model"].timeframe
+        config = app_state["config"]
+        timeframe = config.model.timeframe
+
         timeframe_data = app_state["processed_data"][timeframe]
         test_df = timeframe_data["splits"]["test"]
         model_inputs = timeframe_data["model_inputs"]
@@ -450,16 +486,19 @@ async def select_strategy(
         logger.error(f"Error updating strategy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/strategy/compare")
 async def compare_strategies(
-    strategies: List[Dict],
-    backtest_service: BacktestService = Depends(get_backtest_service),
-    data_service: DataService = Depends(get_data_service)
+        strategies: List[Dict],
+        backtest_service: BacktestService = Depends(get_backtest_service),
+        data_service: DataService = Depends(get_data_service)
 ):
     """Compare multiple trading strategies"""
     try:
         # Get test data
-        timeframe = app_state["config"]["model"].timeframe
+        config = app_state["config"]
+        timeframe = config.model.timeframe
+
         timeframe_data = app_state["processed_data"][timeframe]
         test_df = timeframe_data["splits"]["test"]
         
@@ -525,19 +564,24 @@ async def activate_strategy(name: str, strategy_manager: StrategyManager = Depen
         raise HTTPException(status_code=404, detail=f"Strategy not found: {name}")
     return {"message": "Active strategy set successfully", "name": name}
 
+
 @app.get("/strategies/compare")
 async def compare_strategies(
-    strategy_manager: StrategyManager = Depends(get_strategy_manager),
-    backtest_service: BacktestService = Depends(get_backtest_service)
+        strategy_manager: StrategyManager = Depends(get_strategy_manager),
+        backtest_service: BacktestService = Depends(get_backtest_service)
 ):
     """Compare all strategies"""
     # Get test data
-    timeframe = app_state["config"]["model"].timeframe
+    config = app_state["config"]
+    timeframe = config.model.timeframe
+
     timeframe_data = app_state["processed_data"][timeframe]
     test_df = timeframe_data["splits"]["test"]
-    
+
     # Compare strategies
     results = strategy_manager.compare_strategies(backtest_service, test_df)
+
+    return results
     
     return results    
 if __name__ == "__main__":

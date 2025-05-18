@@ -35,140 +35,147 @@ class ModelService:
         self.price_history = []
         self.mse_history = []
         self.price_bins = None
-    
+
     def build_transformer_model(self) -> Model:
         """
         Build Transformer model for price prediction
-        
+
         Returns:
             Compiled Transformer model
         """
         window_size = self.config.get('window_size', 60)
-        num_features = 9  # Time, OHLCV, EMA9, EMA21, EMA220
+        num_features = 8  # OHLCV, EMA9, EMA21, EMA220
         d_model = self.config.get('d_model', 64)
         num_heads = self.config.get('num_heads', 4)
         num_bins = self.config.get('bins', 10)
-        
+
         # Input layer
         inputs = Input(shape=(window_size, num_features))
-        
+
+        # Project input to d_model dimensions
+        projection = Dense(d_model)(inputs)
+
         # Multi-head self-attention
         attention_output = MultiHeadAttention(
-            num_heads=num_heads, 
+            num_heads=num_heads,
             key_dim=d_model // num_heads
-        )(inputs, inputs)
-        
+        )(projection, projection)
+
         # Add & Norm (residual connection and layer normalization)
-        attention_output = LayerNormalization(epsilon=1e-6)(inputs + attention_output)
-        
+        attention_output = LayerNormalization(epsilon=1e-6)(projection + attention_output)
+
         # Feed-forward network
         ffn = Dense(d_model, activation='relu', kernel_regularizer=l2(0.01))(attention_output)
         ffn = Dropout(0.2)(ffn)
-        
+
         # Add & Norm
         ffn_output = LayerNormalization(epsilon=1e-6)(attention_output + ffn)
-        
+
         # Global average pooling to reduce sequence dimension
         pooled = tf.keras.layers.GlobalAveragePooling1D()(ffn_output)
-        
+
         # Output layer with bins
         outputs = Dense(num_bins, activation='softmax')(pooled)
-        
+
         # Build and compile model
         model = Model(inputs=inputs, outputs=outputs)
-        
+
         model.compile(
             optimizer=Adam(learning_rate=0.001),
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
-        
+
         logger.info("Built Transformer model for price prediction")
         logger.info(f"Model configuration: window_size={window_size}, d_model={d_model}, num_heads={num_heads}")
-        
+
         return model
-    
+
     def build_cnn_model(self) -> Model:
         """
         Build CNN model for pattern recognition
-        
+
         Returns:
             Compiled CNN model
         """
         window_size = self.config.get('window_size', 60)
-        num_features = 9  # OHLCV, EMAs
-        
+        num_features = 8  # OHLCV, EMAs
+
         # Input layer
         inputs = Input(shape=(window_size, num_features))
-        
+
         # Reshape for 2D convolution (add channel dimension)
         reshaped = Reshape((window_size, num_features, 1))(inputs)
-        
+
         # First convolutional block
         conv1 = Conv2D(
-            filters=32, 
-            kernel_size=(3, 3), 
-            activation='relu', 
+            filters=32,
+            kernel_size=(3, 3),
+            activation='relu',
             padding='same',
             kernel_regularizer=l2(0.01)
         )(reshaped)
         pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
-        
+
         # Second convolutional block
         conv2 = Conv2D(
-            filters=64, 
-            kernel_size=(3, 3), 
-            activation='relu', 
+            filters=64,
+            kernel_size=(3, 3),
+            activation='relu',
             padding='same',
             kernel_regularizer=l2(0.01)
         )(pool1)
         pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
-        
+
         # Flatten and dense layers
         flattened = Flatten()(pool2)
         dense = Dense(128, activation='relu', kernel_regularizer=l2(0.01))(flattened)
         dropout = Dropout(0.2)(dense)
-        
+
         # Output layer for pattern recognition (3 classes)
         outputs = Dense(3, activation='softmax')(dropout)
-        
+
         # Build and compile model
         model = Model(inputs=inputs, outputs=outputs)
-        
+
         model.compile(
             optimizer=Adam(learning_rate=0.001),
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
-        
+
         logger.info("Built CNN model for pattern recognition")
-        
+
         return model
-    
+
     def build_combined_model(self) -> Model:
         """
         Build combined model using transformer and CNN features
-        
+
         Returns:
             Compiled combined model
         """
         window_size = self.config.get('window_size', 60)
-        num_features = 9
-        
+        num_features = 8
+        d_model = self.config.get('d_model', 64)
+
         # Shared input
         inputs = Input(shape=(window_size, num_features))
-        
+
+        # Project input to d_model dimensions for transformer
+        projection = Dense(d_model)(inputs)
+
         # Transformer branch
         attention_output = MultiHeadAttention(
-            num_heads=4, 
+            num_heads=4,
             key_dim=16
-        )(inputs, inputs)
-        attention_output = LayerNormalization(epsilon=1e-6)(inputs + attention_output)
-        ffn = Dense(64, activation='relu', kernel_regularizer=l2(0.01))(attention_output)
+        )(projection, projection)
+        attention_output = LayerNormalization(epsilon=1e-6)(projection + attention_output)
+        ffn = Dense(d_model, activation='relu', kernel_regularizer=l2(0.01))(attention_output)
         ffn = Dropout(0.2)(ffn)
         ffn_output = LayerNormalization(epsilon=1e-6)(attention_output + ffn)
         transformer_features = tf.keras.layers.GlobalAveragePooling1D()(ffn_output)
-        
+
         # CNN branch
         reshaped = Reshape((window_size, num_features, 1))(inputs)
         conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(reshaped)
@@ -176,19 +183,19 @@ class ModelService:
         conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
         pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
         cnn_features = Flatten()(pool2)
-        
+
         # Combine features
         combined = Concatenate()([transformer_features, cnn_features])
         combined = Dense(128, activation='relu')(combined)
         combined = Dropout(0.2)(combined)
-        
+
         # Output layers
         price_output = Dense(self.config.get('bins', 10), activation='softmax', name='price_prediction')(combined)
         pattern_output = Dense(3, activation='softmax', name='pattern_recognition')(combined)
-        
+
         # Build and compile combined model
         model = Model(inputs=inputs, outputs=[price_output, pattern_output])
-        
+
         model.compile(
             optimizer=Adam(learning_rate=0.001),
             loss={
@@ -200,11 +207,11 @@ class ModelService:
                 'pattern_recognition': ['accuracy']
             }
         )
-        
+
         logger.info("Built combined model with shared features")
-        
+
         return model
-    
+
     def preprocess_price_targets(self, y_data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Preprocess price targets into bins for classification
@@ -628,3 +635,65 @@ class ModelService:
                 return True
                 
         return False
+
+    def train_models(self, X_train: np.ndarray, y_train: np.ndarray,
+                     X_val: np.ndarray, y_val: np.ndarray) -> Dict[str, Any]:
+        """
+        Train both transformer and CNN models
+
+        Args:
+            X_train: Training features
+            y_train: Training targets
+            X_val: Validation features
+            y_val: Validation targets
+
+        Returns:
+            Dictionary with training results
+        """
+        logger.info(f"Training models with {len(X_train)} samples")
+
+        # Train transformer model for price prediction
+        transformer_model, transformer_history = self.train_transformer(
+            X_train, y_train, X_val, y_val
+        )
+
+        # Train CNN model for pattern recognition
+        cnn_model, cnn_history = self.train_cnn(X_train, X_val)
+
+        # Store models
+        self.transformer_model = transformer_model
+        self.cnn_model = cnn_model
+
+        # Return training results
+        return {
+            "transformer": {
+                "model": transformer_model,
+                "history": transformer_history
+            },
+            "cnn": {
+                "model": cnn_model,
+                "history": cnn_history
+            }
+        }
+
+    def predict(self, X_data: np.ndarray) -> Dict[str, Any]:
+        """
+        Generate predictions using trained models
+
+        Args:
+            X_data: Input features
+
+        Returns:
+            Dictionary with predictions
+        """
+        # Use existing predict_prices method
+        predictions = self.predict_prices(X_data)
+
+        # Extract relevant information for API response
+        return {
+            "price_prediction": predictions["price_predictions"],
+            "pattern": predictions["pattern_predictions"],
+            "pattern_labels": predictions["pattern_predictions"],
+            "entropy": predictions["entropy"],
+            "confidence": predictions["confidence"]
+        }
