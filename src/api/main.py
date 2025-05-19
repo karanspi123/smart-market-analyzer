@@ -39,9 +39,9 @@ app.add_middleware(
 # Define models
 class DataConfig(BaseModel):
     csv_path: str
-    instrument: str = "NQ"
+    instrument: str = "MES"
     split: Dict[str, float] = {"train": 0.7, "val": 0.15, "test": 0.15}
-    sample_rate: str = "1-minute"
+    sample_rate: str = "15-minute"
     
     @validator('split')
     def validate_split(cls, split):
@@ -54,7 +54,7 @@ class DataConfig(BaseModel):
 class ModelConfig(BaseModel):
     price_model: str = "Transformer"
     pattern_model: str = "CNN"
-    timeframe: str = "1-minute"
+    timeframe: str = "15-minute"
     window_size: int = 60
     bins: int = 10
     num_heads: int = 4
@@ -147,6 +147,12 @@ async def train_models_task():
         # Access the model attribute of the Config object
         config = app_state["config"]
         timeframe = config.model.timeframe
+
+        if timeframe not in processed_data:
+            logger.error(
+                f"Timeframe {timeframe} not found in processed data. Available timeframes: {list(processed_data.keys())}")
+            app_state["training_state"] = "failed"
+            return
 
         timeframe_data = processed_data[timeframe]
 
@@ -379,6 +385,9 @@ async def run_backtest(
         # Get test data
         config = app_state["config"]
         timeframe = config.model.timeframe
+
+        if timeframe not in app_state["processed_data"]:
+            raise HTTPException(status_code=400, detail=f"Timeframe {timeframe} not found in processed data")
 
         timeframe_data = app_state["processed_data"][timeframe]
         test_df = timeframe_data["splits"]["test"]
