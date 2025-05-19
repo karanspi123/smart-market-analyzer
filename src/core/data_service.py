@@ -138,31 +138,33 @@ class DataService:
         df_normalized[numeric_cols] = self.scaler.fit_transform(df[numeric_cols])
         
         return df_normalized
-    
+
     def resample_data(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
         """
         Resample data to multiple timeframes based on config
-        
+
         Args:
             df: Input DataFrame with datetime index
-            
+
         Returns:
             Dictionary with resampled DataFrames
         """
-        sample_rate = self.config.get('sample_rate', '1-minute')
-        resampled = {'1-minute': df}
-        
-        if sample_rate == '1-minute':
+        sample_rate = self.config.get('sample_rate', '15-minute')
+
+        # If the data is already at the requested sample rate
+        if sample_rate == '15-minute':
             # No resampling needed
-            return resampled
-        
+            return {'15-minute': df}
+
         # Define resampling rules
         resample_rules = {
             '5-minute': '5min',
             '15-minute': '15min',
             '1-hour': '1H'
         }
-        
+
+        resampled = {}
+
         # Resample OHLC data
         for timeframe, rule in resample_rules.items():
             if timeframe == sample_rate or sample_rate == 'multi':
@@ -173,13 +175,13 @@ class DataService:
                     'Close': 'last',
                     'Volume': 'sum'
                 })
-                
+
                 # Handle EMAs
                 ema_cols = [col for col in df.columns if col.startswith('EMA')]
                 if ema_cols:
                     for ema_col in ema_cols:
                         resampled[timeframe][ema_col] = df[ema_col].resample(rule).last()
-        
+
         return resampled
 
     def create_regime_aware_split(self, df: pd.DataFrame) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:

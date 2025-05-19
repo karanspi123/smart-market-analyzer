@@ -1,18 +1,18 @@
 {
     "data": {
-      "csv_path": "data/market/NQ_1_Minute.csv",
-      "instrument": "NQ",
+      "csv_path": "data/market/MES_15min_Export.csv",
+      "instrument": "MES",
       "split": {
         "train": 0.7,
         "val": 0.15,
         "test": 0.15
       },
-      "sample_rate": "1-minute"
+      "sample_rate": "15-minute"
     },
     "model": {
       "price_model": "Transformer",
       "pattern_model": "CNN",
-      "timeframe": "1-minute",
+      "timeframe": "15-minute",
       "window_size": 60,
       "bins": 10,
       "num_heads": 4,
