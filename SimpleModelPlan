@@ -1,0 +1,116 @@
+
+“What exactly do you want this model to do in a real-world trading setup?”
+
+🔍 Questions:
+	1.	What will this model output?
+	•	☐ Predict next 15-min Close price
+	•	☐ Predict direction (up/down) of next bar
+	•	☐ Predict range (High-Low)
+	•	☐ Signal a Buy/Sell/Hold decision
+	2.	How do you plan to use this model in trading?
+	•	☐ Run every 15 min to guide discretionary trading
+	•	☐ Automate trades based on it
+	•	☐ Filter setups manually
+	•	☐ Use as input to a broader strategy (e.g., multi-timeframe logic)
+	3.	**What’s your desired outcome per trade?
+	•	☐ Gain 2 points on MES per signal
+	•	☐ Win 60% of the time with 1.5R:1R risk/reward
+	•	☐ Reduce false breakouts
+
+Let’s solidify the target.
+
+⸻
+
+📦 Phase 2: Data Scope & Strategy Design
+
+Let’s refine the dataset that your model will consume.
+
+🔍 Questions:
+	4.	What timeframe is your model trained on?
+	•	✅ 15-minute
+	•	Do you want to include other timeframes like 1H or daily as secondary features?
+	5.	What years of data do you have?
+	•	✅ You mentioned 6 years — do you have:
+	•	☐ Continuous contract (MES ##-##)?
+	•	☐ Adjusted for splits/rollovers?
+	6.	Do you want to predict regular trading hours (RTH) only, or full 24h session?
+	•	☐ 9:30 AM–4:00 PM EST (RTH)
+	•	☐ Full Globex (00:00–23:59 EST)
+	•	This affects volume, volatility, and noise levels significantly.
+
+⸻
+
+🧠 Phase 3: Feature Engineering and Predictive Logic
+
+You’re interested in how price behaves relative to EMA9, EMA21, EMA220 and Volume.
+
+🔍 Questions:
+	7.	What relationships do you want the model to learn?
+	•	☐ Mean reversion: “Price tends to return to EMA21”
+	•	☐ Momentum: “If price is above all EMAs with increasing volume, it will keep going”
+	•	☐ Compression: “When EMAs are tight, big moves follow”
+	•	☑ Custom logic?
+	8.	Do you want the model to learn candle structure too?
+	•	☐ Include Open/High/Low
+	•	☐ Add range, body size, wick ratios?
+	•	☐ Include last X candle types (e.g., engulfing, doji, inside bar)?
+	9.	Do you want to include trend direction based on slope of EMA?
+	•	☐ Yes — we can add EMA21 slope, EMA220 slope
+	•	☐ Use trend angle as numeric input
+
+⸻
+
+📈 Phase 4: Label Engineering (What You Train Toward)
+
+🔍 Questions:
+	10.	How do we define a “good prediction”?
+
+	•	☐ Absolute price (regression)
+	•	☐ Classification into buckets (e.g., ↑, ↓, no move)
+	•	☐ Predict if Close > EMA in next bar
+	•	☐ Predict if breakout will hold
+
+	11.	How far ahead are you trying to predict?
+
+	•	✅ Next 15-minute candle?
+	•	☐ Next 2-3 candles?
+	•	☐ Trend continuation over next 1 hour?
+
+	12.	What’s the minimum movement you care about?
+
+	•	☐ 0.25 point (1 tick)
+	•	☐ 1.0 point
+	•	☐ Only large moves (> 5 point swings)
+
+This affects whether we use classification thresholds (e.g., up only if > 0.1%).
+
+⸻
+
+💸 Phase 5: Trading Considerations
+
+🔍 Questions:
+	13.	Do you want risk management built in?
+
+	•	☐ Max daily drawdown
+	•	☐ Max position size
+	•	☐ Filter trades during high volatility
+
+	14.	Do you want the model to avoid trading during news?
+
+	•	☐ Yes, use economic calendar integration
+	•	☐ No, learn through volatility
+
+	15.	Will you paper trade this or connect to live orders (IBKR/NinjaTrader)?
+
+	•	☐ Simulation only
+	•	☐ Live trading via API
+
+⸻
+
+🎯 Final Build Plan (after your answers)
+
+Once you respond to these questions, I’ll generate:
+	•	✅ Clean data_service.py based on what you want
+	•	✅ Custom model_service.py for regression or classification
+	•	✅ Streamlined main.py
+	•	✅ Clear backtesting or inference script to evaluate next steps
