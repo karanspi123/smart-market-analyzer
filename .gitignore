@@ -1,0 +1,10 @@
+EOF
+.DS_Store
+.env
+.env.docker
+*.swp
+.idea/
+venv/
+__pycache__/
+*.pyc
+EOF
